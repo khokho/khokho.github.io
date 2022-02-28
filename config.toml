@@ -1,0 +1,26 @@
+# The URL the site will be built for
+base_url = "https://khokho.github.io"
+
+
+title = "khokho's blog"
+description = "A place for my ideas, ctf writeups or adventures in different fields of CS and math"
+generate_rss = true
+
+
+# Whether to automatically compile all Sass files in the sass directory
+compile_sass = true
+
+# Whether to build a search index to be used later on by a JavaScript library
+build_search_index = true
+
+[markdown]
+# Whether to do syntax highlighting
+# Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
+highlight_code = true
+
+[extra]
+henry_links = [
+    {url = "/about", name = "About"},
+]
+henry_github = "https://github.com/khokho"
+henry_twitter = "https://twitter.com/skkhokho"
