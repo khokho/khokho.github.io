@@ -352,4 +352,9 @@ e() // e is now a function so we can call it
 
 I'm speaking with no experience here but this is basic idea of how heap overflow bugs are exploited in big projects like V8 but there's much more stuff going on there so it's way harder to get determinism.
 
-Thanks for the reading til the end! Let's hope I'll write more writeups :D
+Thanks for the reading till the end! 
+
+Let's hope I'll write more writeups.
+
+Glory to Ukraine!
+
