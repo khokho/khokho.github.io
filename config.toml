@@ -2,8 +2,8 @@
 base_url = "https://khokho.ge"
 
 
-title = "khokho's abandoned blog"
-description = "A place for my ideas, ctf writeups or adventures in different fields of CS and math"
+title = "khokho's single writeup blog"
+description = "A place for my ideas, ctf writeups or adventures in different fields of CS and math. Started by motivated me 2 years ago. Turns out I can't find time for writeups. Maybe someday..."
 generate_rss = true
 
 
